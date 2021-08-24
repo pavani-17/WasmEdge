@@ -11,9 +11,48 @@
 #include <cstdlib>
 #include <iostream>
 
+#include "opentelemetry/sdk/trace/simple_processor.h"
+#include "opentelemetry/sdk/trace/tracer_provider.h"
+#include "opentelemetry/trace/provider.h"
+#include "opentelemetry/exporters/ostream/span_exporter.h"
+#include "opentelemetry/trace/provider.h"
+
+namespace trace = opentelemetry::trace;
+namespace nostd = opentelemetry::nostd;
+
+namespace
+{
+  nostd::shared_ptr<trace::Tracer> get_tracer()
+  {
+    auto provider = trace::Provider::GetTracerProvider();
+    return provider->GetTracer("wasmedgec");
+  }
+
+  void initTracer()
+  {
+    auto exporter = std::unique_ptr<sdktrace::SpanExporter>(
+        new opentelemetry::exporter::trace::OStreamSpanExporter);
+    auto processor = std::unique_ptr<sdktrace::SpanProcessor>(
+        new sdktrace::SimpleSpanProcessor(std::move(exporter)));
+    auto provider = nostd::shared_ptr<opentelemetry::trace::TracerProvider>(
+        new sdktrace::TracerProvider(std::move(processor)));
+
+    // Set the global trace provider
+    opentelemetry::trace::Provider::SetTracerProvider(provider);
+  }
+
+}
+
+
 int main(int Argc, const char *Argv[]) {
   namespace PO = WasmEdge::PO;
   using namespace std::literals;
+
+  initTracer();
+
+  auto span = get_tracer()->StartSpan("wasmedgec");
+  auto scope = get_tracer()->WithActiveSpan(span);
+
 
   std::ios::sync_with_stdio(false);
   WasmEdge::Log::setErrorLoggingLevel();
@@ -72,10 +111,12 @@ int main(int Argc, const char *Argv[]) {
            .add_option("allow-command"sv, AllowCmd)
            .add_option("allow-command-all"sv, AllowCmdAll)
            .parse(Argc, Argv)) {
+    span->End();
     return EXIT_FAILURE;
   }
   if (Parser.isVersion()) {
     std::cout << Argv[0] << " version "sv << WasmEdge::kVersionString << '\n';
+    span->End();
     return EXIT_SUCCESS;
   }
 
@@ -127,8 +168,10 @@ int main(int Argc, const char *Argv[]) {
     // command mode
     if (auto Result = VM.runWasmFile(InputPath.u8string(), "_start");
         Result || Result.error() == WasmEdge::ErrCode::Terminated) {
+          span->End();
       return static_cast<int>(WasiMod->getEnv().getExitCode());
     } else {
+      span->End();
       return EXIT_FAILURE;
     }
   } else {
@@ -136,16 +179,20 @@ int main(int Argc, const char *Argv[]) {
     if (Args.value().empty()) {
       std::cerr
           << "A function name is required when reactor mode is enabled.\n";
+      span->End();
       return EXIT_FAILURE;
     }
     const auto &FuncName = Args.value().front();
     if (auto Result = VM.loadWasm(InputPath.u8string()); !Result) {
+      span->End();
       return EXIT_FAILURE;
     }
     if (auto Result = VM.validate(); !Result) {
+      span->End();
       return EXIT_FAILURE;
     }
     if (auto Result = VM.instantiate(); !Result) {
+      span->End();
       return EXIT_FAILURE;
     }
 
@@ -165,6 +212,7 @@ int main(int Argc, const char *Argv[]) {
 
     if (HasInit) {
       if (auto Result = VM.execute(InitFunc); !Result) {
+        span->End();
         return EXIT_FAILURE;
       }
     }
@@ -236,8 +284,10 @@ int main(int Argc, const char *Argv[]) {
           break;
         }
       }
+      span->End();
       return EXIT_SUCCESS;
     } else {
+      span->End();
       return EXIT_FAILURE;
     }
   }

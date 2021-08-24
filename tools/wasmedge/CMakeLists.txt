@@ -1,4 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
+set(opentelemetry-cpp_DIR "/root/opentelemetry-cpp")
+find_package(opentelemetry-cpp CONFIG REQUIRED)
+
+include_directories(${OPENTELEMETRY_CPP_INCLUDE_DIRS})
+link_libraries(${OPENTELEMETRY_CPP_LIBRARIES})
+
 file(COPY
   ${CMAKE_CURRENT_SOURCE_DIR}/examples
   DESTINATION
